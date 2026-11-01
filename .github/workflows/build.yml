@@ -1,1 +1,58 @@
+name: Build TikTok Explorer APK
 
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+
+      - name: Buat Struktur & Compile APK
+        run: |
+          flutter create --org com.tiktok.explorer my_app
+          
+          # Salin file proyek
+          find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
+          find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
+          
+          cd my_app
+          
+          # Script Python untuk memaksa compileSdk 36 & minSdk 21 secara akurat
+          python3 -c "
+          import glob, re
+          for f in glob.glob('android/app/build.gradle*'):
+              with open(f, 'r') as file:
+                  s = file.read()
+              s = re.sub(r'compileSdk(Version)?\s*=?\s*.*', 'compileSdk = 36', s)
+              s = re.sub(r'minSdk(Version)?\s*=?\s*.*', 'minSdk = 21', s)
+              with open(f, 'w') as file:
+                  file.write(s)
+          "
+          
+          # Terima semua lisensi SDK
+          yes | flutter doctor --android-licenses || true
+          
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload File APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TikTokExplorer-APK
+          path: my_app/build/app/outputs/flutter-apk/app-release.apk
