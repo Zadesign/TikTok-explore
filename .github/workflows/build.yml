@@ -25,18 +25,18 @@ jobs:
 
       - name: Buat Struktur & Compile APK
         run: |
-          # 1. Suntikkan script sakti untuk MEMATIKAN sensor AarMetadata dan paksa semua plugin ke 36
+          # 1. Suntikkan init.gradle BERSIH (Paksa semua plugin & file_picker ke SDK 36 tanpa mematikan folder)
           mkdir -p ~/.gradle
           cat << 'EOF' > ~/.gradle/init.gradle
           allprojects {
               afterEvaluate { project ->
                   if (project.hasProperty("android")) {
                       try {
-                          project.android.compileSdkVersion = 36
+                          project.android.compileSdk = 36
+                          if (project.android.hasProperty("defaultConfig")) {
+                              project.android.defaultConfig.targetSdk = 36
+                          }
                       } catch (Exception e) {}
-                  }
-                  tasks.matching { it.name.contains("AarMetadata") }.configureEach {
-                      enabled = false
                   }
               }
           }
@@ -44,19 +44,20 @@ jobs:
 
           flutter create --org com.tiktok.explorer my_app
           
-          # Salin file proyek
+          # 2. Salin file proyek
           find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
           find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
           
           cd my_app
           
-          # Paksa versi SDK di level aplikasi
+          # 3. Kunci versi di aplikasi utama ke 36 dan minSdk 21
           python3 -c "
           import glob, re
           for f in glob.glob('android/app/build.gradle*'):
               with open(f, 'r') as file:
                   s = file.read()
               s = re.sub(r'compileSdk(Version)?\s*=?\s*.*', 'compileSdk = 36', s)
+              s = re.sub(r'targetSdk(Version)?\s*=?\s*.*', 'targetSdk = 36', s)
               s = re.sub(r'minSdk(Version)?\s*=?\s*.*', 'minSdk = 21', s)
               with open(f, 'w') as file:
                   file.write(s)
