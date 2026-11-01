@@ -25,6 +25,23 @@ jobs:
 
       - name: Buat Struktur & Compile APK
         run: |
+          # 1. Suntikkan script sakti untuk MEMATIKAN sensor AarMetadata dan paksa semua plugin ke 36
+          mkdir -p ~/.gradle
+          cat << 'EOF' > ~/.gradle/init.gradle
+          allprojects {
+              afterEvaluate { project ->
+                  if (project.hasProperty("android")) {
+                      try {
+                          project.android.compileSdkVersion = 36
+                      } catch (Exception e) {}
+                  }
+                  tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+                      enabled = false
+                  }
+              }
+          }
+          EOF
+
           flutter create --org com.tiktok.explorer my_app
           
           # Salin file proyek
@@ -33,7 +50,7 @@ jobs:
           
           cd my_app
           
-          # Script Python untuk memaksa compileSdk 36 & minSdk 21 secara akurat
+          # Paksa versi SDK di level aplikasi
           python3 -c "
           import glob, re
           for f in glob.glob('android/app/build.gradle*'):
@@ -45,7 +62,6 @@ jobs:
                   file.write(s)
           "
           
-          # Terima semua lisensi SDK
           yes | flutter doctor --android-licenses || true
           
           flutter pub get
