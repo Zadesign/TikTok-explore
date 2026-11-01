@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,10 +21,10 @@ class TikTokExplorerApp extends StatelessWidget {
       title: 'TikTok Saved Explorer',
       debugShowCheckedModeBanner: false,
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: const Color(0xFF090A0F),
+        scaffoldBackgroundColor: const Color(0xFF000000), // iOS True Black
         colorScheme: const ColorScheme.dark(
-          primary: Color(0xFFFE2C55),
-          secondary: Color(0xFF25F4EE),
+          primary: Color(0xFF007AFF), // iOS System Blue
+          secondary: Color(0xFFFE2C55),
         ),
       ),
       home: const HomeScreen(),
@@ -40,6 +41,7 @@ class VideoItem {
   String? coverUrl;
   String? author;
   String? title;
+  String? videoDownloadUrl;
 
   VideoItem({
     required this.id,
@@ -50,6 +52,7 @@ class VideoItem {
     this.coverUrl,
     this.author,
     this.title,
+    this.videoDownloadUrl,
   });
 }
 
@@ -69,8 +72,11 @@ class _HomeScreenState extends State<HomeScreen> {
   bool isLoading = false;
   String statusMessage = "Pilih file user_data.json TikTok";
   String searchQuery = "";
-  String sortOrder = "newest"; // "newest" atau "oldest"
+  String sortOrder = "newest";
   String selectedYear = "Semua";
+
+  int currentPage = 1;
+  int pageSize = 24;
 
   final TextEditingController searchController = TextEditingController();
 
@@ -84,17 +90,25 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       isLoading = true;
-      statusMessage = "Membaca file JSON (10.8 MB)...";
+      statusMessage = "Membaca arsip data...";
     });
 
     try {
-      final bytes = result.files.first.bytes;
-      if (bytes == null) throw Exception("Gagal membaca file");
+      String rawString = "";
+      final fileData = result.files.first;
 
-      final rawString = utf8.decode(bytes);
+      if (fileData.bytes != null) {
+        rawString = utf8.decode(fileData.bytes!);
+      } else if (fileData.path != null) {
+        final file = File(fileData.path!);
+        rawString = await file.readAsString();
+      } else {
+        throw Exception("Gagal membaca file");
+      }
+
       final dynamic root = jsonDecode(rawString);
 
-      setState(() => statusMessage = "Mengindeks kategori & video...");
+      setState(() => statusMessage = "Menyusun feed video...");
 
       final Map<String, List<VideoItem>> parsed = {};
       final block = _findLikesFavorites(root);
@@ -145,12 +159,13 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         activeList = allCategories[selectedCategory] ?? [];
         isLoading = false;
+        currentPage = 1;
         _applyFilter();
       });
     } catch (e) {
       setState(() {
         isLoading = false;
-        statusMessage = "Error: $e";
+        statusMessage = "Gagal memproses data: $e";
       });
     }
   }
@@ -175,7 +190,6 @@ class _HomeScreenState extends State<HomeScreen> {
   void _applyFilter() {
     List<VideoItem> temp = List.from(activeList);
 
-    // Filter Pencarian
     if (searchQuery.isNotEmpty) {
       final q = searchQuery.toLowerCase();
       temp = temp.where((item) {
@@ -187,12 +201,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }).toList();
     }
 
-    // Filter Tahun
     if (selectedYear != "Semua") {
-      temp = temp.where((item) => item.date.startsWith(selectedYear) || item.date.endsWith(selectedYear)).toList();
+      temp = temp.where((item) => item.date.contains(selectedYear)).toList();
     }
 
-    // Sortir Tanggal
     if (sortOrder == "newest") {
       temp.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     } else {
@@ -201,17 +213,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
     setState(() {
       filteredList = temp;
+      currentPage = 1;
     });
   }
 
-  void openPlayerModal(int index) {
+  List<VideoItem> get pagedItems {
+    final start = (currentPage - 1) * pageSize;
+    if (start >= filteredList.length) return [];
+    final end = (start + pageSize) > filteredList.length ? filteredList.length : start + pageSize;
+    return filteredList.sublist(start, end);
+  }
+
+  int get totalPages => (filteredList.length / pageSize).ceil() == 0 ? 1 : (filteredList.length / pageSize).ceil();
+
+  void openPlayerModal(int pagedIndex) {
+    final absoluteIndex = (currentPage - 1) * pageSize + pagedIndex;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => VideoDetailModal(
         items: filteredList,
-        initialIndex: index,
+        initialIndex: absoluteIndex,
       ),
     );
   }
@@ -220,45 +243,45 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       extendBodyBehindAppBar: true,
+      // iOS Navigation Bar
       appBar: PreferredSize(
-        preferredSize: const Size.fromHeight(65),
+        preferredSize: const Size.fromHeight(60),
         child: ClipRRect(
           child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+            filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
             child: Container(
-              color: Colors.black.withOpacity(0.45),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.centerLeft,
+              color: const Color(0x991C1C1E), // Apple Frosted Navigation Material
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: SafeArea(
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        Container(
-                          width: 28, height: 28,
-                          decoration: BoxDecoration(
-                            gradient: const LinearGradient(colors: [Color(0xFFFE2C55), Color(0xFF25F4EE)]),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Icon(Icons.play_arrow, size: 18, color: Colors.white),
-                        ),
-                        const SizedBox(width: 8),
-                        const Text(
-                          'TikTok Explorer',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                      ],
-                    ),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFE2C55),
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    const Text(
+                      'Tersimpan',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
                       ),
-                      onPressed: pickJsonFile,
-                      icon: const Icon(Icons.folder_open, size: 16, color: Colors.white),
-                      label: const Text('Buka JSON', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                    // iOS Capsule Button
+                    GestureDetector(
+                      onTap: pickJsonFile,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF007AFF), // Apple Blue
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.add, size: 16, color: Colors.white),
+                            SizedBox(width: 4),
+                            Text('Impor Data', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white)),
+                          ],
+                        ),
+                      ),
                     )
                   ],
                 ),
@@ -270,84 +293,99 @@ class _HomeScreenState extends State<HomeScreen> {
       body: allCategories.isEmpty
           ? Center(
               child: Padding(
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.all(32.0),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (isLoading)
-                      const CircularProgressIndicator(color: Color(0xFFFE2C55))
+                      const CircularProgressIndicator(color: Color(0xFF007AFF))
                     else
-                      const Icon(Icons.video_library_outlined, size: 64, color: Colors.white24),
+                      Icon(Icons.folder_outlined, size: 64, color: Colors.white.withOpacity(0.3)),
                     const SizedBox(height: 16),
-                    Text(statusMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                    Text(
+                      statusMessage,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13, height: 1.4),
+                    ),
                   ],
                 ),
               ),
             )
           : Column(
               children: [
-                const SizedBox(height: 85),
-                
-                // 1. HORIZONTAL TABS KATEGORI
+                const SizedBox(height: 75),
+
+                // 1. iOS CATEGORY PILLS (Apple Segmented Style)
                 SizedBox(
-                  height: 38,
+                  height: 36,
                   child: ListView(
                     scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     children: allCategories.keys.map((cat) {
                       final isSelected = cat == selectedCategory;
                       final count = allCategories[cat]?.length ?? 0;
                       return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ChoiceChip(
-                          label: Text('$cat (${count > 999 ? "${(count/1000).toStringAsFixed(1)}k" : count})'),
-                          selected: isSelected,
-                          selectedColor: Colors.white,
-                          backgroundColor: const Color(0xFF181A24),
-                          labelStyle: TextStyle(
-                            color: isSelected ? Colors.black : Colors.white70,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          onSelected: (val) {
-                            if (val) {
-                              setState(() {
-                                selectedCategory = cat;
-                                activeList = allCategories[cat] ?? [];
-                                _applyFilter();
-                              });
-                            }
+                        padding: const EdgeInsets.only(right: 8),
+                        child: GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              selectedCategory = cat;
+                              activeList = allCategories[cat] ?? [];
+                              _applyFilter();
+                            });
                           },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.white : const Color(0xFF1C1C1E),
+                              borderRadius: BorderRadius.circular(18),
+                              border: Border.all(
+                                color: isSelected ? Colors.transparent : Colors.white.withOpacity(0.08),
+                                width: 0.5,
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '$cat ${count > 0 ? "($count)" : ""}',
+                                style: TextStyle(
+                                  color: isSelected ? Colors.black : Colors.white.withOpacity(0.7),
+                                  fontSize: 12,
+                                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                          ),
                         ),
                       );
                     }).toList(),
                   ),
                 ),
-                
-                // 2. SEARCH & CONTROLS TOOLBAR
+
+                // 2. iOS SEARCH BAR & CONTROLS
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
                   child: Row(
                     children: [
+                      // iOS Rounded Search Box
                       Expanded(
                         child: Container(
                           height: 36,
                           decoration: BoxDecoration(
-                            color: const Color(0xFF161822),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.white12),
+                            color: const Color(0xFF1C1C1E),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: Colors.white.withOpacity(0.08), width: 0.5),
                           ),
                           child: TextField(
                             controller: searchController,
-                            style: const TextStyle(fontSize: 12, color: Colors.white),
-                            decoration: const InputDecoration(
-                              hintText: 'Cari ID, judul, tanggal...',
-                              hintStyle: TextStyle(color: Colors.white38, fontSize: 11),
-                              prefixIcon: Icon(Icons.search, size: 16, color: Colors.white38),
+                            style: const TextStyle(fontSize: 13, color: Colors.white),
+                            decoration: InputDecoration(
+                              hintText: 'Cari koleksi...',
+                              hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 13),
+                              prefixIcon: Icon(Icons.search, size: 18, color: Colors.white.withOpacity(0.4)),
                               border: InputBorder.none,
                               isDense: true,
-                              contentPadding: EdgeInsets.symmetric(vertical: 8),
+                              contentPadding: const EdgeInsets.symmetric(vertical: 9),
                             ),
                             onChanged: (val) {
                               searchQuery = val;
@@ -356,80 +394,77 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         ),
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       // Dropdown Urutan
-                      Container(
-                        height: 36,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF161822),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: sortOrder,
-                            dropdownColor: const Color(0xFF1C1F2D),
-                            style: const TextStyle(fontSize: 11, color: Colors.white),
-                            items: const [
-                              DropdownMenuItem(value: "newest", child: Text("Terbaru")),
-                              DropdownMenuItem(value: "oldest", child: Text("Terlama")),
-                            ],
-                            onChanged: (val) {
-                              if (val != null) {
-                                sortOrder = val;
-                                _applyFilter();
-                              }
-                            },
-                          ),
-                        ),
+                      _buildIosDropdown<String>(
+                        value: sortOrder,
+                        items: const [
+                          DropdownMenuItem(value: "newest", child: Text("Terbaru")),
+                          DropdownMenuItem(value: "oldest", child: Text("Terlama")),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            sortOrder = val;
+                            _applyFilter();
+                          }
+                        },
                       ),
-                      const SizedBox(width: 6),
-                      // Dropdown Loncat Tahun
-                      Container(
-                        height: 36,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF161822),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: selectedYear,
-                            dropdownColor: const Color(0xFF1C1F2D),
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF25F4EE)),
-                            items: ["Semua", "2026", "2025", "2024", "2023", "2022", "2021", "2020"]
-                                .map((y) => DropdownMenuItem(value: y, child: Text(y))).toList(),
-                            onChanged: (val) {
-                              if (val != null) {
-                                selectedYear = val;
-                                _applyFilter();
-                              }
-                            },
-                          ),
-                        ),
+                      const SizedBox(width: 8),
+                      // Dropdown Tahun
+                      _buildIosDropdown<String>(
+                        value: selectedYear,
+                        accentColor: const Color(0xFF007AFF),
+                        items: ["Semua", "2026", "2025", "2024", "2023", "2022", "2021", "2020"]
+                            .map((y) => DropdownMenuItem(value: y, child: Text(y))).toList(),
+                        onChanged: (val) {
+                          if (val != null) {
+                            selectedYear = val;
+                            _applyFilter();
+                          }
+                        },
                       ),
                     ],
                   ),
                 ),
 
-                // Info Jumlah Hasil
+                // Sub-label Info & Paging Size
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'Menampilkan ${filteredList.length} video',
-                      style: const TextStyle(fontSize: 10, color: Colors.white54),
-                    ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '${filteredList.length} video • Hal $currentPage dari $totalPages',
+                        style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.5)),
+                      ),
+                      DropdownButton<int>(
+                        value: pageSize,
+                        isDense: true,
+                        underline: const SizedBox(),
+                        dropdownColor: const Color(0xFF1C1C1E),
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF007AFF), fontWeight: FontWeight.w500),
+                        items: const [
+                          DropdownMenuItem(value: 24, child: Text("24 per hal")),
+                          DropdownMenuItem(value: 48, child: Text("48 per hal")),
+                          DropdownMenuItem(value: 96, child: Text("96 per hal")),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() {
+                              pageSize = val;
+                              currentPage = 1;
+                            });
+                          }
+                        },
+                      )
+                    ],
                   ),
                 ),
 
-                // 3. GRID FEED VIDEO TIKTOK (9:14)
+                // 3. GRID VIDEO FEED iOS STYLE
                 Expanded(
-                  child: filteredList.isEmpty
-                      ? const Center(child: Text("Tidak ada video yang cocok", style: TextStyle(color: Colors.white38, fontSize: 12)))
+                  child: pagedItems.isEmpty
+                      ? Center(child: Text("Tidak ada konten yang sesuai", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 13)))
                       : GridView.builder(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -438,33 +473,95 @@ class _HomeScreenState extends State<HomeScreen> {
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
-                          itemCount: filteredList.length,
+                          itemCount: pagedItems.length,
                           itemBuilder: (context, index) {
-                            final item = filteredList[index];
-                            return VideoCard(
+                            final item = pagedItems[index];
+                            return IosVideoCard(
                               item: item,
                               onTap: () => openPlayerModal(index),
                             );
                           },
                         ),
                 ),
+
+                // 4. iOS BOTTOM TOOLBAR (FROSTED GLASS PAGINATION)
+                ClipRRect(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0x991C1C1E),
+                        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08), width: 0.5)),
+                      ),
+                      child: SafeArea(
+                        top: false,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            TextButton.icon(
+                              onPressed: currentPage > 1 ? () => setState(() => currentPage--) : null,
+                              icon: const Icon(Icons.arrow_back_ios, size: 14),
+                              label: const Text('Sebelumnya', style: TextStyle(fontSize: 12)),
+                            ),
+                            Text(
+                              '$currentPage / $totalPages',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                            TextButton.icon(
+                              onPressed: currentPage < totalPages ? () => setState(() => currentPage++) : null,
+                              label: const Text('Berikutnya', style: TextStyle(fontSize: 12)),
+                              icon: const Icon(Icons.arrow_forward_ios, size: 14),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                )
               ],
             ),
     );
   }
+
+  Widget _buildIosDropdown<T>({
+    required T value,
+    required List<DropdownMenuItem<T>> items,
+    required ValueChanged<T?> onChanged,
+    Color? accentColor,
+  }) {
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1C1C1E),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: Colors.white.withOpacity(0.08), width: 0.5),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<T>(
+          value: value,
+          dropdownColor: const Color(0xFF1C1C1E),
+          style: TextStyle(fontSize: 12, color: accentColor ?? Colors.white.withOpacity(0.85), fontWeight: FontWeight.w500),
+          items: items,
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
 }
 
-class VideoCard extends StatefulWidget {
+class IosVideoCard extends StatefulWidget {
   final VideoItem item;
   final VoidCallback onTap;
 
-  const VideoCard({super.key, required this.item, required this.onTap});
+  const IosVideoCard({super.key, required this.item, required this.onTap});
 
   @override
-  State<VideoCard> createState() => _VideoCardState();
+  State<IosVideoCard> createState() => _IosVideoCardState();
 }
 
-class _VideoCardState extends State<VideoCard> {
+class _IosVideoCardState extends State<IosVideoCard> {
   @override
   void initState() {
     super.initState();
@@ -483,6 +580,7 @@ class _VideoCardState extends State<VideoCard> {
             widget.item.coverUrl = data['cover'] ?? data['origin_cover'];
             widget.item.author = data['author']?['nickname'];
             widget.item.title = data['title'];
+            widget.item.videoDownloadUrl = data['play'];
           });
         }
       }
@@ -494,30 +592,39 @@ class _VideoCardState extends State<VideoCard> {
     return GestureDetector(
       onTap: widget.onTap,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14), // Apple Squircle Curves
         child: Container(
-          color: const Color(0xFF141722),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1C1C1E),
+            border: Border.all(color: Colors.white.withOpacity(0.06), width: 0.5),
+          ),
           child: Stack(
             fit: StackFit.expand,
             children: [
-              if (widget.item.coverUrl != null)
+              // 1. Apple Material Dark Fallback
+              Container(
+                color: const Color(0xFF1C1C1E),
+                child: Center(
+                  child: Icon(Icons.music_note, color: Colors.white.withOpacity(0.08), size: 36),
+                ),
+              ),
+
+              // 2. Poster Image
+              if (widget.item.coverUrl != null && widget.item.coverUrl!.isNotEmpty)
                 CachedNetworkImage(
                   imageUrl: widget.item.coverUrl!,
                   fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(color: const Color(0xFF181B28)),
-                  errorWidget: (_, __, ___) => _fallbackCover(),
-                )
-              else
-                _fallbackCover(),
-              
-              // Gradient Overlay
+                  errorWidget: (context, url, error) => const SizedBox(),
+                ),
+
+              // 3. Apple Vignette Gradient
               Container(
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
                     colors: [
-                      Colors.black.withOpacity(0.7),
+                      Colors.black.withOpacity(0.65),
                       Colors.transparent,
                       Colors.black.withOpacity(0.85),
                     ],
@@ -525,7 +632,7 @@ class _VideoCardState extends State<VideoCard> {
                 ),
               ),
 
-              // Header Kartu
+              // Top Label (Creator & Date)
               Positioned(
                 top: 8, left: 8, right: 8,
                 child: Row(
@@ -535,31 +642,43 @@ class _VideoCardState extends State<VideoCard> {
                       child: Text(
                         widget.item.author != null ? '@${widget.item.author}' : 'TikTok',
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF25F4EE), fontWeight: FontWeight.bold),
+                        style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.w600),
                       ),
                     ),
-                    Text(widget.item.date, style: const TextStyle(fontSize: 9, color: Colors.white70)),
+                    Text(
+                      widget.item.date,
+                      style: TextStyle(fontSize: 9, color: Colors.white.withOpacity(0.6)),
+                    ),
                   ],
                 ),
               ),
 
-              // Tombol Play Mengambang
-              const Center(
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: Colors.black45,
-                  child: Icon(Icons.play_arrow, size: 20, color: Colors.white),
+              // Apple Translucent Frosted Center Play Indicator
+              Center(
+                child: ClipOval(
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                    child: Container(
+                      width: 40, height: 40,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.black.withOpacity(0.35),
+                        border: Border.all(color: Colors.white.withOpacity(0.4), width: 0.5),
+                      ),
+                      child: const Icon(Icons.play_arrow_rounded, size: 24, color: Colors.white),
+                    ),
+                  ),
                 ),
               ),
 
-              // Footer Judul
+              // Bottom Caption
               Positioned(
                 bottom: 8, left: 8, right: 8,
                 child: Text(
-                  widget.item.title ?? (widget.item.content.isNotEmpty ? widget.item.content : 'ID: ${widget.item.id}'),
+                  widget.item.title ?? (widget.item.content.isNotEmpty ? widget.item.content : 'Video #${widget.item.id}'),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10, color: Colors.white, height: 1.3),
+                  style: const TextStyle(fontSize: 10, color: Colors.white, height: 1.3, fontWeight: FontWeight.w400),
                 ),
               )
             ],
@@ -568,23 +687,9 @@ class _VideoCardState extends State<VideoCard> {
       ),
     );
   }
-
-  Widget _fallbackCover() {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1C1F2E), Color(0xFF10121A)],
-        ),
-      ),
-      child: Center(
-        child: Icon(Icons.music_note, color: Colors.white.withOpacity(0.15), size: 36),
-      ),
-    );
-  }
 }
 
+// iOS ACTION SHEET MODAL
 class VideoDetailModal extends StatefulWidget {
   final List<VideoItem> items;
   final int initialIndex;
@@ -602,6 +707,30 @@ class _VideoDetailModalState extends State<VideoDetailModal> {
   void initState() {
     super.initState();
     currentIndex = widget.initialIndex;
+    _checkDownloadLink();
+  }
+
+  void _checkDownloadLink() async {
+    final item = widget.items[currentIndex];
+    if (item.videoDownloadUrl == null && item.id.isNotEmpty) {
+      try {
+        final res = await http.get(Uri.parse('https://www.tikwm.com/api/?url=${item.id}')).timeout(const Duration(seconds: 4));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body)['data'];
+          if (data != null && mounted) {
+            setState(() {
+              item.videoDownloadUrl = data['play'];
+            });
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  void watchInApp() async {
+    final item = widget.items[currentIndex];
+    final url = Uri.parse('https://www.tiktok.com/player/v1/${item.id}?autoplay=1&loop=1');
+    await launchUrl(url, mode: LaunchMode.inAppBrowserView);
   }
 
   void openTikTokApp() async {
@@ -614,11 +743,31 @@ class _VideoDetailModalState extends State<VideoDetailModal> {
     }
   }
 
+  void downloadVideo() async {
+    final item = widget.items[currentIndex];
+    if (item.videoDownloadUrl != null && item.videoDownloadUrl!.isNotEmpty) {
+      final uri = Uri.parse(item.videoDownloadUrl!);
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mengunduh video MP4 tanpa watermark...')),
+        );
+      }
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Menyiapkan tautan video...')),
+        );
+      }
+      _checkDownloadLink();
+    }
+  }
+
   void copyLink() {
     final item = widget.items[currentIndex];
     Clipboard.setData(ClipboardData(text: item.link.isNotEmpty ? item.link : 'https://www.tiktok.com/@/video/${item.id}'));
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Link video disalin!'), duration: Duration(seconds: 1)),
+      const SnackBar(content: Text('Tautan berhasil disalin'), duration: Duration(seconds: 1)),
     );
   }
 
@@ -627,26 +776,51 @@ class _VideoDetailModalState extends State<VideoDetailModal> {
     final item = widget.items[currentIndex];
 
     return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      filter: ImageFilter.blur(sigmaX: 35, sigmaY: 35),
       child: Container(
-        height: MediaQuery.of(context).size.height * 0.88,
+        height: MediaQuery.of(context).size.height * 0.90,
         decoration: BoxDecoration(
-          color: const Color(0xFF10121A).withOpacity(0.85),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: Colors.white12),
+          color: const Color(0xE61C1C1E), // Apple Dark Action Sheet Material
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(22)),
+          border: Border.all(color: Colors.white.withOpacity(0.08), width: 0.5),
         ),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
         child: Column(
           children: [
-            // Bar Atas
+            // iOS Grabber Bar
+            Center(
+              child: Container(
+                width: 36, height: 5,
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.25),
+                  borderRadius: BorderRadius.circular(2.5),
+                ),
+              ),
+            ),
+
+            // Top Bar
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('ID: ${item.id}', style: const TextStyle(color: Color(0xFF25F4EE), fontFamily: 'monospace', fontSize: 12)),
-                IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context))
+                Text(
+                  'ID: ${item.id}',
+                  style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 11, fontFamily: 'monospace'),
+                ),
+                GestureDetector(
+                  onTap: () => Navigator.pop(context),
+                  child: Container(
+                    width: 28, height: 28,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.12),
+                    ),
+                    child: const Icon(Icons.close, size: 16, color: Colors.white),
+                  ),
+                )
               ],
             ),
-            
+
             // Konten Tengah
             Expanded(
               child: Center(
@@ -654,35 +828,58 @@ class _VideoDetailModalState extends State<VideoDetailModal> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      if (item.coverUrl != null)
+                      if (item.coverUrl != null && item.coverUrl!.isNotEmpty)
                         ClipRRect(
                           borderRadius: BorderRadius.circular(16),
-                          child: CachedNetworkImage(imageUrl: item.coverUrl!, height: 320, fit: BoxFit.cover),
+                          child: CachedNetworkImage(imageUrl: item.coverUrl!, height: 290, fit: BoxFit.cover),
                         ),
                       const SizedBox(height: 12),
-                      Text(item.author != null ? '@${item.author}' : 'TikTok Video', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                      Text(
+                        item.author != null ? '@${item.author}' : 'TikTok Video',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.white),
+                      ),
                       const SizedBox(height: 4),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Text(item.title ?? item.content, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.white70)),
-                      ),
-                      const SizedBox(height: 16),
-                      // Tombol Putar di Aplikasi
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFE2C55),
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        child: Text(
+                          item.title ?? item.content,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.7), height: 1.3),
                         ),
-                        onPressed: openTikTokApp,
-                        icon: const Icon(Icons.play_arrow, color: Colors.white),
-                        label: const Text('Putar Video di Aplikasi TikTok', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 18),
+
+                      // 1. iOS Primary Blue Action Button
+                      _buildIosButton(
+                        onTap: watchInApp,
+                        color: const Color(0xFF007AFF),
+                        icon: Icons.play_arrow_rounded,
+                        label: 'Putar di Aplikasi',
                       ),
                       const SizedBox(height: 8),
-                      TextButton.icon(
+
+                      // 2. TikTok Accent Button
+                      _buildIosButton(
+                        onTap: openTikTokApp,
+                        color: const Color(0xFFFE2C55),
+                        icon: Icons.open_in_new_rounded,
+                        label: 'Buka di TikTok',
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 3. Apple Sub-Action Button (Download MP4)
+                      _buildIosButton(
+                        onTap: downloadVideo,
+                        color: Colors.white.withOpacity(0.1),
+                        icon: Icons.arrow_downward_rounded,
+                        label: 'Unduh Video MP4',
+                        textColor: Colors.white,
+                      ),
+
+                      const SizedBox(height: 6),
+                      TextButton(
                         onPressed: copyLink,
-                        icon: const Icon(Icons.copy, size: 14, color: Colors.white54),
-                        label: const Text('Salin Tautan Video', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                        child: Text('Salin Tautan', style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
                       )
                     ],
                   ),
@@ -690,21 +887,59 @@ class _VideoDetailModalState extends State<VideoDetailModal> {
               ),
             ),
 
-            // Bar Bawah: Navigasi
+            // Bottom Navigation Segment
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                ElevatedButton(
-                  onPressed: currentIndex > 0 ? () => setState(() => currentIndex--) : null,
-                  child: const Text('⏮ Sebelumnya'),
+                IconButton(
+                  icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: Colors.white),
+                  onPressed: currentIndex > 0 ? () {
+                    setState(() => currentIndex--);
+                    _checkDownloadLink();
+                  } : null,
                 ),
-                Text('${currentIndex + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
-                ElevatedButton(
-                  onPressed: currentIndex < widget.items.length - 1 ? () => setState(() => currentIndex++) : null,
-                  child: const Text('Berikutnya ⏭'),
+                Text(
+                  '${currentIndex + 1} dari ${widget.items.length}',
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18, color: Colors.white),
+                  onPressed: currentIndex < widget.items.length - 1 ? () {
+                    setState(() => currentIndex++);
+                    _checkDownloadLink();
+                  } : null,
                 ),
               ],
             )
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildIosButton({
+    required VoidCallback onTap,
+    required Color color,
+    required IconData icon,
+    required String label,
+    Color textColor = Colors.white,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 18, color: textColor),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: textColor)),
           ],
         ),
       ),
