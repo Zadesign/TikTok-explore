@@ -26,8 +26,9 @@ jobs:
       - name: Buat Struktur & Compile APK
         run: |
           flutter create --org com.tiktok.explorer my_app
-          cp pubspec.yaml my_app/pubspec.yaml
-          cp lib/main.dart my_app/lib/main.dart
+          # Mencari file pubspec dan main.dart di mana pun posisinya
+          find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
+          find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
           cd my_app
           flutter pub get
           flutter build apk --release
