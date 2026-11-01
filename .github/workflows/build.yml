@@ -1,77 +1,707 @@
-name: Build TikTok Explorer APK
+import 'dart:convert';
+import 'dart:io';
+import 'dart:ui';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 
-on:
-  push:
-    branches: [ main, master ]
-  workflow_dispatch:
+void main() {
+  runApp(const TikTokExplorerApp());
+}
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
+class TikTokExplorerApp extends StatelessWidget {
+  const TikTokExplorerApp({super.key});
 
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'TikTok Saved Explorer',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: const Color(0xFF090A0F),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFFFE2C55),
+          secondary: Color(0xFF25F4EE),
+        ),
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          channel: 'stable'
+class VideoItem {
+  final String id;
+  final String date;
+  final int timestamp;
+  final String link;
+  final String content;
+  String? coverUrl;
+  String? author;
+  String? title;
 
-      - name: Buat Struktur & Compile APK
-        run: |
-          mkdir -p ~/.gradle
-          cat << 'EOF' > ~/.gradle/init.gradle
-          allprojects {
-              afterEvaluate { project ->
-                  if (project.hasProperty("android")) {
-                      try {
-                          project.android.compileSdk = 36
-                          if (project.android.hasProperty("defaultConfig")) {
-                              project.android.defaultConfig.targetSdk = 36
-                          }
-                      } catch (Exception e) {}
-                  }
-              }
+  VideoItem({
+    required this.id,
+    required this.date,
+    required this.timestamp,
+    required this.link,
+    required this.content,
+    this.coverUrl,
+    this.author,
+    this.title,
+  });
+}
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  Map<String, List<VideoItem>> allCategories = {};
+  String selectedCategory = "Favorite Videos";
+  List<VideoItem> activeList = [];
+  List<VideoItem> filteredList = [];
+
+  bool isLoading = false;
+  String statusMessage = "Pilih file user_data.json TikTok";
+  String searchQuery = "";
+  String sortOrder = "newest";
+  String selectedYear = "Semua";
+
+  final TextEditingController searchController = TextEditingController();
+
+  Future<void> pickJsonFile() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.any,
+      withData: true,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() {
+      isLoading = true;
+      statusMessage = "Membaca file JSON (10.8 MB)...";
+    });
+
+    try {
+      String rawString = "";
+      final fileData = result.files.first;
+
+      if (fileData.bytes != null) {
+        rawString = utf8.decode(fileData.bytes!);
+      } else if (fileData.path != null) {
+        final file = File(fileData.path!);
+        rawString = await file.readAsString();
+      } else {
+        throw Exception("Gagal membaca file dari penyimpanan");
+      }
+
+      final dynamic root = jsonDecode(rawString);
+
+      setState(() => statusMessage = "Mengindeks video & kategori...");
+
+      final Map<String, List<VideoItem>> parsed = {};
+      final block = _findLikesFavorites(root);
+
+      if (block != null) {
+        block.forEach((k, v) {
+          List items = [];
+          if (v is List) {
+            items = v;
+          } else if (v is Map) {
+            for (var val in v.values) {
+              if (val is List) { items = val; break; }
+            }
           }
-          EOF
 
-          flutter create --org com.tiktok.explorer my_app
-          
-          # Salin file proyek
-          find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
-          find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
-          
-          cd my_app
-          
-          # AKTIFKAN IZIN INTERNET DI ANDROID
-          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"\/>' android/app/src/main/AndroidManifest.xml
-          
-          # Kunci versi SDK
-          python3 -c "
-          import glob, re
-          for f in glob.glob('android/app/build.gradle*'):
-              with open(f, 'r') as file:
-                  s = file.read()
-              s = re.sub(r'compileSdk(Version)?\s*=?\s*.*', 'compileSdk = 36', s)
-              s = re.sub(r'targetSdk(Version)?\s*=?\s*.*', 'targetSdk = 36', s)
-              s = re.sub(r'minSdk(Version)?\s*=?\s*.*', 'minSdk = 21', s)
-              with open(f, 'w') as file:
-                  file.write(s)
-          "
-          
-          yes | flutter doctor --android-licenses || true
-          
-          flutter pub get
-          flutter build apk --release
+          parsed[k.toString()] = items.map((item) {
+            final rawDate = (item['Date'] ?? item['date'] ?? item['DateAdd'] ?? '').toString();
+            final link = (item['Link'] ?? item['link'] ?? item['VideoLink'] ?? '').toString();
+            final content = (item['FavoriteComment'] ?? item['FavoriteCollection'] ?? item['Comment'] ?? '').toString();
 
-      - name: Upload File APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: TikTokExplorer-APK
-          path: my_app/build/app/outputs/flutter-apk/app-release.apk
+            String id = "";
+            final match = RegExp(r'(?:video/|/share/video/)(\d{15,22})').firstMatch(link);
+            if (match != null) id = match.group(1)!;
+
+            int ts = 0;
+            String displayDate = rawDate.split(' ').first;
+            try {
+              ts = DateTime.parse(rawDate.replaceAll(' ', 'T')).millisecondsSinceEpoch;
+            } catch (_) {}
+
+            return VideoItem(
+              id: id,
+              date: displayDate.isEmpty ? 'No Date' : displayDate,
+              timestamp: ts,
+              link: link,
+              content: content,
+            );
+          }).toList();
+        });
+      }
+
+      setState(() {
+        allCategories = parsed;
+        if (allCategories.containsKey("Favorite Videos")) {
+          selectedCategory = "Favorite Videos";
+        } else if (allCategories.isNotEmpty) {
+          selectedCategory = allCategories.keys.first;
+        }
+        activeList = allCategories[selectedCategory] ?? [];
+        isLoading = false;
+        _applyFilter();
+      });
+    } catch (e) {
+      setState(() {
+        isLoading = false;
+        statusMessage = "Error: $e";
+      });
+    }
+  }
+
+  dynamic _findLikesFavorites(dynamic root) {
+    if (root is! Map) return null;
+    for (var k in root.keys) {
+      final str = k.toString().toLowerCase();
+      if (str.contains('likes and favorites') || str == 'favorite videos' || str == 'like list') {
+        return root[k] is Map ? root[k] : root;
+      }
+    }
+    for (var v in root.values) {
+      if (v is Map) {
+        final res = _findLikesFavorites(v);
+        if (res != null) return res;
+      }
+    }
+    return null;
+  }
+
+  void _applyFilter() {
+    List<VideoItem> temp = List.from(activeList);
+
+    if (searchQuery.isNotEmpty) {
+      final q = searchQuery.toLowerCase();
+      temp = temp.where((item) {
+        return item.id.contains(q) ||
+               item.date.toLowerCase().contains(q) ||
+               item.content.toLowerCase().contains(q) ||
+               (item.title != null && item.title!.toLowerCase().contains(q)) ||
+               (item.author != null && item.author!.toLowerCase().contains(q));
+      }).toList();
+    }
+
+    if (selectedYear != "Semua") {
+      temp = temp.where((item) => item.date.contains(selectedYear)).toList();
+    }
+
+    if (sortOrder == "newest") {
+      temp.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    } else {
+      temp.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    }
+
+    setState(() {
+      filteredList = temp;
+    });
+  }
+
+  void openPlayerModal(int index) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => VideoDetailModal(
+        items: filteredList,
+        initialIndex: index,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      extendBodyBehindAppBar: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(65),
+        child: ClipRRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+            child: Container(
+              color: Colors.black.withOpacity(0.45),
+              padding: const EdgeInsets.symmetric(horizontal: 14),
+              alignment: Alignment.centerLeft,
+              child: SafeArea(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 28, height: 28,
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(colors: [Color(0xFFFE2C55), Color(0xFF25F4EE)]),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(Icons.play_arrow, size: 18, color: Colors.white),
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'TikTok Explorer',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFFE2C55),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      ),
+                      onPressed: pickJsonFile,
+                      icon: const Icon(Icons.folder_open, size: 16, color: Colors.white),
+                      label: const Text('Buka JSON', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    )
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+      body: allCategories.isEmpty
+          ? Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (isLoading)
+                      const CircularProgressIndicator(color: Color(0xFFFE2C55))
+                    else
+                      const Icon(Icons.video_library_outlined, size: 64, color: Colors.white24),
+                    const SizedBox(height: 16),
+                    Text(statusMessage, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  ],
+                ),
+              ),
+            )
+          : Column(
+              children: [
+                const SizedBox(height: 85),
+                
+                // TABS KATEGORI
+                SizedBox(
+                  height: 38,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    children: allCategories.keys.map((cat) {
+                      final isSelected = cat == selectedCategory;
+                      final count = allCategories[cat]?.length ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: ChoiceChip(
+                          label: Text('$cat (${count > 999 ? "${(count/1000).toStringAsFixed(1)}k" : count})'),
+                          selected: isSelected,
+                          selectedColor: Colors.white,
+                          backgroundColor: const Color(0xFF181A24),
+                          labelStyle: TextStyle(
+                            color: isSelected ? Colors.black : Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          onSelected: (val) {
+                            if (val) {
+                              setState(() {
+                                selectedCategory = cat;
+                                activeList = allCategories[cat] ?? [];
+                                _applyFilter();
+                              });
+                            }
+                          },
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                
+                // PENCARIAN & KONTROL
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF161822),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: TextField(
+                            controller: searchController,
+                            style: const TextStyle(fontSize: 12, color: Colors.white),
+                            decoration: const InputDecoration(
+                              hintText: 'Cari ID, judul, tanggal...',
+                              hintStyle: TextStyle(color: Colors.white38, fontSize: 11),
+                              prefixIcon: Icon(Icons.search, size: 16, color: Colors.white38),
+                              border: InputBorder.none,
+                              isDense: true,
+                              contentPadding: EdgeInsets.symmetric(vertical: 8),
+                            ),
+                            onChanged: (val) {
+                              searchQuery = val;
+                              _applyFilter();
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        height: 36,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161822),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: sortOrder,
+                            dropdownColor: const Color(0xFF1C1F2D),
+                            style: const TextStyle(fontSize: 11, color: Colors.white),
+                            items: const [
+                              DropdownMenuItem(value: "newest", child: Text("Terbaru")),
+                              DropdownMenuItem(value: "oldest", child: Text("Terlama")),
+                            ],
+                            onChanged: (val) {
+                              if (val != null) {
+                                sortOrder = val;
+                                _applyFilter();
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        height: 36,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161822),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: selectedYear,
+                            dropdownColor: const Color(0xFF1C1F2D),
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF25F4EE)),
+                            items: ["Semua", "2026", "2025", "2024", "2023", "2022", "2021", "2020"]
+                                .map((y) => DropdownMenuItem(value: y, child: Text(y))).toList(),
+                            onChanged: (val) {
+                              if (val != null) {
+                                selectedYear = val;
+                                _applyFilter();
+                              }
+                            },
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Menampilkan ${filteredList.length} video',
+                      style: const TextStyle(fontSize: 10, color: Colors.white54),
+                    ),
+                  ),
+                ),
+
+                // FEED GRID TIKTOK 9:14
+                Expanded(
+                  child: filteredList.isEmpty
+                      ? const Center(child: Text("Tidak ada video yang cocok", style: TextStyle(color: Colors.white38, fontSize: 12)))
+                      : GridView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 9 / 14,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
+                          ),
+                          itemCount: filteredList.length,
+                          itemBuilder: (context, index) {
+                            final item = filteredList[index];
+                            return VideoCard(
+                              item: item,
+                              onTap: () => openPlayerModal(index),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+    );
+  }
+}
+
+class VideoCard extends StatefulWidget {
+  final VideoItem item;
+  final VoidCallback onTap;
+
+  const VideoCard({super.key, required this.item, required this.onTap});
+
+  @override
+  State<VideoCard> createState() => _VideoCardState();
+}
+
+class _VideoCardState extends State<VideoCard> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.item.coverUrl == null && widget.item.id.isNotEmpty) {
+      _fetchCover();
+    }
+  }
+
+  Future<void> _fetchCover() async {
+    try {
+      final res = await http.get(Uri.parse('https://www.tikwm.com/api/?url=${widget.item.id}')).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body)['data'];
+        if (data != null && mounted) {
+          setState(() {
+            widget.item.coverUrl = data['cover'] ?? data['origin_cover'];
+            widget.item.author = data['author']?['nickname'];
+            widget.item.title = data['title'];
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: widget.onTap,
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          color: const Color(0xFF141722),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // 1. Background bawaan
+              Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [Color(0xFF1C1F2E), Color(0xFF10121A)],
+                  ),
+                ),
+                child: const Center(
+                  child: Icon(Icons.music_note, color: Colors.white12, size: 36),
+                ),
+              ),
+
+              // 2. Cover thumbnail dari internet jika tersedia
+              if (widget.item.coverUrl != null && widget.item.coverUrl!.isNotEmpty)
+                CachedNetworkImage(
+                  imageUrl: widget.item.coverUrl!,
+                  fit: BoxFit.cover,
+                  errorWidget: (context, url, error) => const SizedBox(),
+                ),
+              
+              // 3. Gradasi agar teks terbaca jelas
+              Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.7),
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.85),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Header Kartu
+              Positioned(
+                top: 8, left: 8, right: 8,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.item.author != null ? '@${widget.item.author}' : 'TikTok',
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF25F4EE), fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    Text(widget.item.date, style: const TextStyle(fontSize: 9, color: Colors.white70)),
+                  ],
+                ),
+              ),
+
+              // Ikon Play Tengah
+              const Center(
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.black45,
+                  child: Icon(Icons.play_arrow, size: 20, color: Colors.white),
+                ),
+              ),
+
+              // Judul Video Bawah
+              Positioned(
+                bottom: 8, left: 8, right: 8,
+                child: Text(
+                  widget.item.title ?? (widget.item.content.isNotEmpty ? widget.item.content : 'ID: ${widget.item.id}'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: Colors.white, height: 1.3),
+                ),
+              )
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class VideoDetailModal extends StatefulWidget {
+  final List<VideoItem> items;
+  final int initialIndex;
+
+  const VideoDetailModal({super.key, required this.items, required this.initialIndex});
+
+  @override
+  State<VideoDetailModal> createState() => _VideoDetailModalState();
+}
+
+class _VideoDetailModalState extends State<VideoDetailModal> {
+  late int currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    currentIndex = widget.initialIndex;
+  }
+
+  void openTikTokApp() async {
+    final item = widget.items[currentIndex];
+    final uri = Uri.parse('snssdk1180://aweme/detail/${item.id}');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri);
+    } else {
+      await launchUrl(Uri.parse('https://www.tiktok.com/@/video/${item.id}'), mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void copyLink() {
+    final item = widget.items[currentIndex];
+    Clipboard.setData(ClipboardData(text: item.link.isNotEmpty ? item.link : 'https://www.tiktok.com/@/video/${item.id}'));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Link video disalin!'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.items[currentIndex];
+
+    return BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.88,
+        decoration: BoxDecoration(
+          color: const Color(0xFF10121A).withOpacity(0.85),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          border: Border.all(color: Colors.white12),
+        ),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('ID: ${item.id}', style: const TextStyle(color: Color(0xFF25F4EE), fontFamily: 'monospace', fontSize: 12)),
+                IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context))
+              ],
+            ),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (item.coverUrl != null && item.coverUrl!.isNotEmpty)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(imageUrl: item.coverUrl!, height: 320, fit: BoxFit.cover),
+                        ),
+                      const SizedBox(height: 12),
+                      Text(item.author != null ? '@${item.author}' : 'TikTok Video', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Text(item.title ?? item.content, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.white70)),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFE2C55),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        ),
+                        onPressed: openTikTokApp,
+                        icon: const Icon(Icons.play_arrow, color: Colors.white),
+                        label: const Text('Putar Video di Aplikasi TikTok', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: copyLink,
+                        icon: const Icon(Icons.copy, size: 14, color: Colors.white54),
+                        label: const Text('Salin Tautan Video', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      )
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                ElevatedButton(
+                  onPressed: currentIndex > 0 ? () => setState(() => currentIndex--) : null,
+                  child: const Text('⏮ Sebelumnya'),
+                ),
+                Text('${currentIndex + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
+                ElevatedButton(
+                  onPressed: currentIndex < widget.items.length - 1 ? () => setState(() => currentIndex++) : null,
+                  child: const Text('Berikutnya ⏭'),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+}
