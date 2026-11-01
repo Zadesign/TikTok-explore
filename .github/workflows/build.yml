@@ -25,7 +25,6 @@ jobs:
 
       - name: Buat Struktur & Compile APK
         run: |
-          # 1. Suntikkan init.gradle BERSIH (Paksa semua plugin & file_picker ke SDK 36 tanpa mematikan folder)
           mkdir -p ~/.gradle
           cat << 'EOF' > ~/.gradle/init.gradle
           allprojects {
@@ -44,13 +43,16 @@ jobs:
 
           flutter create --org com.tiktok.explorer my_app
           
-          # 2. Salin file proyek
+          # Salin file proyek
           find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
           find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
           
           cd my_app
           
-          # 3. Kunci versi di aplikasi utama ke 36 dan minSdk 21
+          # AKTIFKAN IZIN INTERNET DI ANDROID
+          sed -i '/<manifest/a \    <uses-permission android:name="android.permission.INTERNET"\/>' android/app/src/main/AndroidManifest.xml
+          
+          # Kunci versi SDK
           python3 -c "
           import glob, re
           for f in glob.glob('android/app/build.gradle*'):
