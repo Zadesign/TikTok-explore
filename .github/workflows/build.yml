@@ -26,10 +26,22 @@ jobs:
       - name: Buat Struktur & Compile APK
         run: |
           flutter create --org com.tiktok.explorer my_app
-          # Mencari file pubspec dan main.dart di mana pun posisinya
+          
+          # Salin file proyek
           find . -name "pubspec.yaml" ! -path "./my_app/*" -exec cp {} my_app/pubspec.yaml \;
           find . -name "main.dart" ! -path "./my_app/*" -exec cp {} my_app/lib/main.dart \;
+          
           cd my_app
+          
+          # Naikkan versi minSdk & compileSdk agar sesuai dengan plugin
+          sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle || true
+          sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle || true
+          sed -i 's/flutter.targetSdkVersion/34/g' android/app/build.gradle || true
+          
+          # Fallback jika memakai format gradle terbaru
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle.kts || true
+          
           flutter pub get
           flutter build apk --release
 
