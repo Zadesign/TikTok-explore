@@ -33,14 +33,17 @@ jobs:
           
           cd my_app
           
-          # Naikkan versi minSdk & compileSdk agar sesuai dengan plugin
+          # Sesuaikan versi SDK ke API 35 (Android 15) & minSdk 21
           sed -i 's/flutter.minSdkVersion/21/g' android/app/build.gradle || true
-          sed -i 's/flutter.compileSdkVersion/34/g' android/app/build.gradle || true
-          sed -i 's/flutter.targetSdkVersion/34/g' android/app/build.gradle || true
+          sed -i 's/flutter.compileSdkVersion/35/g' android/app/build.gradle || true
+          sed -i 's/flutter.targetSdkVersion/35/g' android/app/build.gradle || true
           
-          # Fallback jika memakai format gradle terbaru
           sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 21/g' android/app/build.gradle.kts || true
-          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle.kts || true
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/g' android/app/build.gradle.kts || true
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 35/g' android/app/build.gradle.kts || true
+          
+          # Terima semua lisensi SDK
+          yes | flutter doctor --android-licenses || true
           
           flutter pub get
           flutter build apk --release
@@ -49,4 +52,3 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TikTokExplorer-APK
-          path: my_app/build/app/outputs/flutter-apk/app-release.apk
