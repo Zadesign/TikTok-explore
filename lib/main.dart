@@ -535,18 +535,31 @@ class _VideoCardState extends State<VideoCard> {
                       child: Text(
                         widget.item.author != null ? '@${widget.item.author}' : 'TikTok',
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF25F        child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      widget.item.title ?? widget.item.content,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 10, color: Colors.white),
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF25F4EE), fontWeight: FontWeight.bold),
+                      ),
                     ),
-                    const SizedBox(height: 2),
-                    Text(widget.item.date, style: const TextStyle(fontSize: 9, color: Colors.white54)),
+                    Text(widget.item.date, style: const TextStyle(fontSize: 9, color: Colors.white70)),
                   ],
+                ),
+              ),
+
+              // Tombol Play Mengambang
+              const Center(
+                child: CircleAvatar(
+                  radius: 18,
+                  backgroundColor: Colors.black45,
+                  child: Icon(Icons.play_arrow, size: 20, color: Colors.white),
+                ),
+              ),
+
+              // Footer Judul
+              Positioned(
+                bottom: 8, left: 8, right: 8,
+                child: Text(
+                  widget.item.title ?? (widget.item.content.isNotEmpty ? widget.item.content : 'ID: ${widget.item.id}'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10, color: Colors.white, height: 1.3),
                 ),
               )
             ],
@@ -555,19 +568,34 @@ class _VideoCardState extends State<VideoCard> {
       ),
     );
   }
+
+  Widget _fallbackCover() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF1C1F2E), Color(0xFF10121A)],
+        ),
+      ),
+      child: Center(
+        child: Icon(Icons.music_note, color: Colors.white.withOpacity(0.15), size: 36),
+      ),
+    );
+  }
 }
 
-class VideoPlayerModal extends StatefulWidget {
+class VideoDetailModal extends StatefulWidget {
   final List<VideoItem> items;
   final int initialIndex;
 
-  const VideoPlayerModal({super.key, required this.items, required this.initialIndex});
+  const VideoDetailModal({super.key, required this.items, required this.initialIndex});
 
   @override
-  State<VideoPlayerModal> createState() => _VideoPlayerModalState();
+  State<VideoDetailModal> createState() => _VideoDetailModalState();
 }
 
-class _VideoPlayerModalState extends State<VideoPlayerModal> {
+class _VideoDetailModalState extends State<VideoDetailModal> {
   late int currentIndex;
 
   @override
@@ -576,7 +604,7 @@ class _VideoPlayerModalState extends State<VideoPlayerModal> {
     currentIndex = widget.initialIndex;
   }
 
-  void openInApp() async {
+  void openTikTokApp() async {
     final item = widget.items[currentIndex];
     final uri = Uri.parse('snssdk1180://aweme/detail/${item.id}');
     if (await canLaunchUrl(uri)) {
@@ -586,54 +614,83 @@ class _VideoPlayerModalState extends State<VideoPlayerModal> {
     }
   }
 
+  void copyLink() {
+    final item = widget.items[currentIndex];
+    Clipboard.setData(ClipboardData(text: item.link.isNotEmpty ? item.link : 'https://www.tiktok.com/@/video/${item.id}'));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Link video disalin!'), duration: Duration(seconds: 1)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final item = widget.items[currentIndex];
 
     return BackdropFilter(
-      filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+      filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
       child: Container(
-        height: MediaQuery.of(context).size.height * 0.85,
+        height: MediaQuery.of(context).size.height * 0.88,
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.75),
+          color: const Color(0xFF10121A).withOpacity(0.85),
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-          border: Border.all(color: Colors.white.withOpacity(0.15)),
+          border: Border.all(color: Colors.white12),
         ),
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // Bar Atas
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('ID: ${item.id}', style: const TextStyle(color: Color(0xFF25F4EE), fontFamily: 'monospace')),
+                Text('ID: ${item.id}', style: const TextStyle(color: Color(0xFF25F4EE), fontFamily: 'monospace', fontSize: 12)),
                 IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context))
               ],
             ),
+            
+            // Konten Tengah
             Expanded(
               child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (item.coverUrl != null)
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: CachedNetworkImage(imageUrl: item.coverUrl!, height: 350, fit: BoxFit.cover),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (item.coverUrl != null)
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(imageUrl: item.coverUrl!, height: 320, fit: BoxFit.cover),
+                        ),
+                      const SizedBox(height: 12),
+                      Text(item.author != null ? '@${item.author}' : 'TikTok Video', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white)),
+                      const SizedBox(height: 4),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20),
+                        child: Text(item.title ?? item.content, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11, color: Colors.white70)),
                       ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFE2C55),
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                      const SizedBox(height: 16),
+                      // Tombol Putar di Aplikasi
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFE2C55),
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+                        ),
+                        onPressed: openTikTokApp,
+                        icon: const Icon(Icons.play_arrow, color: Colors.white),
+                        label: const Text('Putar Video di Aplikasi TikTok', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
-                      onPressed: openInApp,
-                      icon: const Icon(Icons.play_arrow, color: Colors.white),
-                      label: const Text('Putar Video di Aplikasi TikTok', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    )
-                  ],
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: copyLink,
+                        icon: const Icon(Icons.copy, size: 14, color: Colors.white54),
+                        label: const Text('Salin Tautan Video', style: TextStyle(color: Colors.white54, fontSize: 11)),
+                      )
+                    ],
+                  ),
                 ),
               ),
             ),
+
+            // Bar Bawah: Navigasi
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
@@ -641,7 +698,7 @@ class _VideoPlayerModalState extends State<VideoPlayerModal> {
                   onPressed: currentIndex > 0 ? () => setState(() => currentIndex--) : null,
                   child: const Text('⏮ Sebelumnya'),
                 ),
-                Text('${currentIndex + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                Text('${currentIndex + 1} / ${widget.items.length}', style: const TextStyle(color: Colors.white54, fontSize: 11)),
                 ElevatedButton(
                   onPressed: currentIndex < widget.items.length - 1 ? () => setState(() => currentIndex++) : null,
                   child: const Text('Berikutnya ⏭'),
